@@ -1,0 +1,101 @@
+---
+name: armoctl-incidents
+description: ARMO runtime incidents — list active threats, fetch alerts on a single incident, explain an incident's signal, resolve/silence incidents. Use when investigating live runtime alerts or post-mortems.
+---
+
+# armoctl-incidents
+
+The incidents cluster is the live runtime-threat surface. An incident is the unit of triage; it bundles many alerts produced from runtime detection rules. Severity is ARMO-policy-adjusted, not raw alert severity. Use 'incidents alerts <guid>' to get the full alert payload behind an incident before resolving it.
+
+## Commands
+
+- `alerts [guid]` — List alerts grouped under one incident
+- `explain [guid]` — Aggregate the platform's streaming explanation for an incident
+- `fields` — Print the incidents resource cheatsheet
+- `list` — List runtime incidents
+  - Flags:
+    - `--severity` (string) Filter by severity (critical|high|medium|low)
+- `resolve [guid]` — Resolve a runtime incident (sets status to Resolved)
+  - Flags:
+    - `--false-positive` (bool) Mark the incident as a false positive when resolving
+- `set-status [guid...]` — Change the status of runtime incidents (Open|Investigating|Dismissed|Resolved)
+  - Flags:
+    - `--false-positive` (bool) Mark the incidents as false positives
+    - `--filter` (stringArray) Filter as key=value (repeatable); selects incidents to change
+    - `--search` (string) Free-text search to select incidents
+    - `--status` (string) Target status: Open|Investigating|Dismissed|Resolved (required)
+    - `--stdin` (bool) Read additional incident GUIDs from stdin
+- `severities` — Get aggregate incident counts per severity
+
+## Mutations
+
+Any command that writes (create, update, delete, status changes, …) follows the safety contract of the `armoctl` skill:
+
+1. Run it with `--dry-run` and show the user what will change.
+2. Ask the user to confirm and wait for an explicit "yes". The original request is not confirmation.
+3. After the user confirms, re-run the identical command with `--yes` in place of `--dry-run`. If any argument changes, dry-run and confirm again.
+
+This holds even when the host auto-approves `armoctl` commands.
+
+## Resource fields
+
+### incidents
+
+| Field | Description |
+|---|---|
+| `guid` | Stable incident ID; primary key for resolve/explain/alerts. |
+| `name` | Short rule/incident name (e.g. "Suspicious binary execution"). |
+| `kind` | Incident kind/category (e.g. "ThreatDetection"). |
+| `attributes.incidentStatus` | Current status: Open \| Investigating \| Dismissed \| Resolved. Access with path syntax. |
+| `updatedTime` | RFC3339 timestamp of the last status change. |
+| `timestamp` | RFC3339 time the incident was first raised. |
+| `clusterName` | Kubernetes cluster that reported the incident. |
+| `designators.wlid` | Workload ID (ARMO wlid format). Access with path syntax. |
+| `cloudMetadata.region` | Cloud region where the workload runs. Access with path syntax. |
+| `signature` | Unique fingerprint identifying the rule that fired. |
+
+## Field semantics
+
+**`attributes.incidentStatus`** — Live state machine. Canonical values: Open | Investigating | Dismissed | Resolved. Access with path syntax: .attributes.incidentStatus
+
+**`signature`** — Unique fingerprint identifying the rule that fired. Incidents sharing a signature are the same detection event pattern.
+
+## Recipes
+
+### List Critical incidents (all statuses)
+
+```
+armoctl incidents list --severity Critical
+```
+
+### Get all alerts for an incident
+
+```
+armoctl incidents alerts <incident-guid>
+```
+
+### Dismiss incidents matching a filter
+
+Preview, show the user, and wait for an explicit yes (see Mutations):
+
+```
+armoctl incidents set-status --status Dismissed --filter severity=Low --dry-run
+```
+
+After the user confirms, run the same command with `--yes` in place of `--dry-run`.
+
+### Bulk dismiss a list of incident GUIDs from stdin
+
+Save the GUIDs to a file first, so the dry-run and the confirmed run act on the same list:
+
+```
+armoctl incidents list --severity Low | jq -r '.items[].guid' > guids.txt
+armoctl incidents set-status --status Dismissed --stdin --dry-run < guids.txt
+```
+
+Show the user the dry-run and wait for an explicit yes. Then:
+
+```
+armoctl incidents set-status --status Dismissed --stdin --yes < guids.txt
+```
+
